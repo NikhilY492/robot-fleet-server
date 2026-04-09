@@ -50,8 +50,18 @@ const UserSchema = new mongoose.Schema({
   password: String  // TODO: store bcrypt hashes, not plain text
 }, { collection: "users" });
 
-const Robot = mongoose.model("Robot", RobotSchema);
-const User = mongoose.model("User", UserSchema);
+// Every telemetry packet gets its own document — never overwritten, full history
+const TelemetryLogSchema = new mongoose.Schema({
+  robotId:   { type: String, index: true },
+  timestamp: { type: Date,   default: Date.now, index: true },
+  battery:   Number,
+  location:  Object,
+  speed:     Number,
+}, { collection: "telemetry_logs" });
+
+const Robot        = mongoose.model("Robot",        RobotSchema);
+const User         = mongoose.model("User",         UserSchema);
+const TelemetryLog = mongoose.model("TelemetryLog", TelemetryLogSchema);
 
 // =======================
 //  Health Check
@@ -60,19 +70,46 @@ const User = mongoose.model("User", UserSchema);
 app.get("/", (req, res) => res.send("🤖 Robot Fleet Server Online"));
 
 // =======================
+//  REST: Query telemetry logs
+//  GET /telemetry/:robotId?limit=100&from=2024-01-01&to=2024-12-31
+// =======================
+app.get("/telemetry/:robotId", async (req, res) => {
+  try {
+    const { robotId } = req.params;
+    const limit = parseInt(req.query.limit) || 100;
+    const filter = { robotId };
+
+    if (req.query.from || req.query.to) {
+      filter.timestamp = {};
+      if (req.query.from) filter.timestamp.$gte = new Date(req.query.from);
+      if (req.query.to)   filter.timestamp.$lte = new Date(req.query.to);
+    }
+
+    const logs = await TelemetryLog.find(filter)
+      .sort({ timestamp: -1 })
+      .limit(limit)
+      .lean();
+
+    res.json({ robotId, count: logs.length, logs });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// =======================
 //  WebSocket Logic
 // =======================
 io.on("connection", (socket) => {
-  console.log(`⚡ Connected: ${socket.id}`);
+  console.log("⚡ Connected: " + socket.id);
 
   socket.on("disconnect", async () => {
     if (socket.robotId) {
       await Robot.updateOne({ _id: socket.robotId }, { $set: { status: "offline" } });
-      console.log(`⚠ Robot Offline: ${socket.robotId}`);
+      console.log("⚠ Robot Offline: " + socket.robotId);
     } else if (socket.username) {
-      console.log(`🚪 User Disconnected: ${socket.username}`);
+      console.log("🚪 User Disconnected: " + socket.username);
     } else {
-      console.log(`🔌 Client Disconnected: ${socket.id}`);
+      console.log("🔌 Client Disconnected: " + socket.id);
     }
   });
 
@@ -90,7 +127,7 @@ io.on("connection", (socket) => {
       ip: socket.handshake.address.replace("::ffff:", "")
     });
 
-    console.log(`🤖 Robot Online → ${robotId}`);
+    console.log("🤖 Robot Online → " + robotId);
   });
 
   // ---- Client Checks Robot Status ----
@@ -109,22 +146,35 @@ io.on("connection", (socket) => {
 
   // ---- Robot Sends Telemetry ----
   socket.on("robot_telemetry", async ({ robotId, data }) => {
+    const now = new Date();
+
+    // 1. Update current robot state (overwrites — always shows latest)
     await Robot.updateOne({ _id: robotId }, {
       $set: {
-        battery: data.battery,
+        battery:  data.battery,
         location: data.location,
-        lastSeen: new Date().toISOString()
+        lastSeen: now.toISOString()
       }
     });
-    // Only the operator watching this robot receives telemetry
-    io.to(`operator_${robotId}`).emit("telemetry_update", { robotId, data });
+
+    // 2. Append a log entry (never overwritten — full history)
+    await TelemetryLog.create({
+      robotId,
+      timestamp: now,
+      battery:   data.battery,
+      location:  data.location,
+      speed:     data.speed,
+    });
+
+    // 3. Forward to operator watching this robot
+    io.to("operator_" + robotId).emit("telemetry_update", { robotId, data });
   });
 
   // ---- Operator Subscribes to a Robot's Telemetry ----
   socket.on("watch_robot", ({ robotId }) => {
-    socket.join(`operator_${robotId}`);
+    socket.join("operator_" + robotId);
     socket.watchingRobotId = robotId;
-    console.log(`👁 Operator ${socket.username || socket.id} watching ${robotId}`);
+    console.log("👁 Operator " + (socket.username || socket.id) + " watching " + robotId);
   });
 
   // ---- Client Sends Control Command to Robot ----
@@ -137,7 +187,7 @@ io.on("connection", (socket) => {
     const user = await User.findOne({ username, password });
     if (user) {
       socket.username = username;
-      console.log(`✅ Login: ${username}`);
+      console.log("✅ Login: " + username);
     }
     socket.emit("login_response", { success: !!user });
   });
@@ -145,7 +195,6 @@ io.on("connection", (socket) => {
 
 // =======================
 //  Start Server
-//  Railway auto-injects PORT — never hardcode it
 // =======================
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => console.log(`🌐 Server Online on port ${PORT}`));
+server.listen(PORT, () => console.log("🌐 Server Online on port " + PORT));
