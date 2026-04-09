@@ -2,19 +2,12 @@ import socketio
 import time
 import os
 
-# ==========================
-# CONFIG
-# Read SERVER_URL from environment variable so you never hardcode IPs.
-# Set it before running:
-#   export SERVER_URL=https://your-app.up.railway.app
-#   python robot.py
-# ==========================
 SERVER_URL = os.environ.get("SERVER_URL", "").strip()
 ROBOT_ID   = os.environ.get("ROBOT_ID", "ROBOT003").strip()
 
 if not SERVER_URL:
     print("❌ SERVER_URL environment variable is not set.")
-    print("   Run as: SERVER_URL=https://your-app.up.railway.app python robot.py")
+    print("   Run as: SERVER_URL=https://robot-fleet-server.onrender.com python robot.py")
     exit(1)
 
 print(f"📡 Server : {SERVER_URL}")
@@ -64,7 +57,6 @@ def send_telemetry(battery, x, y, speed):
             "speed": speed
         }
     })
-
 
 # ---------------- MAIN ----------------
 

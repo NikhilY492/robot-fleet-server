@@ -1,3 +1,4 @@
+require("dotenv").config();
 const io = require("socket.io-client");
 const { SerialPort } = require("serialport");
 const { ReadlineParser } = require("@serialport/parser-readline");
@@ -8,7 +9,7 @@ const readline = require("readline");
 //   SERVER_URL=https://your-app.up.railway.app node client.js
 const SERVER_URL = process.env.SERVER_URL || (() => {
   console.error("❌ SERVER_URL not set.");
-  console.error("   Run as: SERVER_URL=https://your-app.up.railway.app node client.js");
+  console.error("   Run as: SERVER_URL=https://robot-fleet-server.onrender.com node client.js");
   process.exit(1);
 })();
 
